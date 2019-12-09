@@ -11,7 +11,8 @@
 
 // ---------------------------------------------------------- private defines --
 
-/* nothing */
+#define __ILI9341_FONT_FIRST_GLYPH__ ' ' // ASCII 0x20 space
+#define __ILI9341_FONT_LAST_GLYPH__  '~' // ASCII 0x7E tilde
 
 // ----------------------------------------------------------- private macros --
 
@@ -339,7 +340,14 @@ ili9341_font_t const ili9341_font_16x26 = {
 
 // ------------------------------------------------------- exported functions --
 
-/* nothing */
+uint8_t glyph_index(unsigned char glyph)
+{
+  if ((glyph >= __ILI9341_FONT_FIRST_GLYPH__) &&
+      (glyph <= __ILI9341_FONT_LAST_GLYPH__)) {
+    return glyph - __ILI9341_FONT_FIRST_GLYPH__;
+  }
+  return 0; // on error, return index of ASCII space (0x20)
+}
 
 // ------------------------------------------------------- private functions --
 

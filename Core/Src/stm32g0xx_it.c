@@ -61,12 +61,12 @@
 extern I2C_HandleTypeDef hi2c1;
 extern SPI_HandleTypeDef hspi1;
 /* USER CODE BEGIN EV */
-extern stusb4500_device_t *usbpd[];
+extern stusb4500_device_t *usbpd;
 extern ili9341_device_t *screen;
 /* USER CODE END EV */
 
 /******************************************************************************/
-/*           Cortex-M0+ Processor Interruption and Exception Handlers          */
+/*           Cortex-M0+ Processor Interruption and Exception Handlers          */ 
 /******************************************************************************/
 /**
   * @brief This function handles Non maskable interrupt.
@@ -144,6 +144,34 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles EXTI line 0 and line 1 interrupts.
+  */
+void EXTI0_1_IRQHandler(void)
+{
+  /* USER CODE BEGIN EXTI0_1_IRQn 0 */
+
+  /* USER CODE END EXTI0_1_IRQn 0 */
+  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_1);
+  /* USER CODE BEGIN EXTI0_1_IRQn 1 */
+
+  /* USER CODE END EXTI0_1_IRQn 1 */
+}
+
+/**
+  * @brief This function handles EXTI line 2 and line 3 interrupts.
+  */
+void EXTI2_3_IRQHandler(void)
+{
+  /* USER CODE BEGIN EXTI2_3_IRQn 0 */
+
+  /* USER CODE END EXTI2_3_IRQn 0 */
+  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_2);
+  /* USER CODE BEGIN EXTI2_3_IRQn 1 */
+
+  /* USER CODE END EXTI2_3_IRQn 1 */
+}
+
+/**
   * @brief This function handles EXTI line 4 to 15 interrupts.
   */
 void EXTI4_15_IRQHandler(void)
@@ -151,8 +179,8 @@ void EXTI4_15_IRQHandler(void)
   /* USER CODE BEGIN EXTI4_15_IRQn 0 */
 
   /* USER CODE END EXTI4_15_IRQn 0 */
-  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_4);
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_8);
+  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_15);
   /* USER CODE BEGIN EXTI4_15_IRQn 1 */
 
   /* USER CODE END EXTI4_15_IRQn 1 */
@@ -194,29 +222,26 @@ void SPI1_IRQHandler(void)
 void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
 {
   switch (GPIO_Pin) {
-  case USBPD_IRQ_Pin:
-    stusb4500_interrupt(usbpd[0]);
-    break;
-
-  case TOUCH_IRQ_Pin:
-    break;
-
-  default:
-    break;
+    case TOUCH_IRQ_Pin:
+      ili9341_touch_interrupt(screen);
+      break;
   }
 }
 
 void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin)
 {
   switch (GPIO_Pin) {
-  case USBPD_IRQ_Pin:
-    break;
+    case USBPD_IRQ_Pin:
+      stusb4500_alert(usbpd);
+      break;
 
-  case TOUCH_IRQ_Pin:
-    break;
+    case TOUCH_IRQ_Pin:
+      ili9341_touch_interrupt(screen);
+      break;
 
-  default:
-    break;
+    case USBPD_ATCH_Pin:
+      stusb4500_attach(usbpd);
+      break;
   }
 }
 /* USER CODE END 1 */

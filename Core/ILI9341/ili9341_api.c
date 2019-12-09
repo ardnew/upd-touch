@@ -30,10 +30,10 @@
 #define __SLAVE_RELEASE(d, s) \
   if (__IS_SPI_SLAVE(s)) { ili9341_spi_slave_release((d), (s)); }
 
-#define U16_MSBYTE(u) (uint8_t)(((uint16_t)(u) >> 8U) & 0xFF)
-#define U16_LSBYTE(u) (uint8_t)(((uint16_t)(u)      ) & 0xFF)
+#define __U16_MSBYTE(u) (uint8_t)(((uint16_t)(u) >> 8U) & 0xFF)
+#define __U16_LSBYTE(u) (uint8_t)(((uint16_t)(u)      ) & 0xFF)
 
-// ----------------------------------------------------------- private types --
+// ------------------------------------------------------------ private types --
 
 /* nothing */
 
@@ -48,10 +48,10 @@ ili9341_color_t const ILI9341_MAGENTA = (ili9341_color_t)0xF81F;
 ili9341_color_t const ILI9341_YELLOW  = (ili9341_color_t)0xFFE0;
 ili9341_color_t const ILI9341_WHITE   = (ili9341_color_t)0xFFFF;
 
-// ------------------------------------------------------- private variables --
+// -------------------------------------------------------- private variables --
 
 #if defined(__ILI9341_STATIC_MEM_ALLOC__)
-static uint8_t __spi_tx_block__[__SPI_TX_BLOCK_SZ__];
+static uint8_t __spi_tx_block__[__SPI_TX_BLOCK_SZ__]; // do not use, theoretically broken
 #endif
 
 // ---------------------------------------------- private function prototypes --
@@ -63,11 +63,11 @@ static ili9341_two_dimension_t ili9341_screen_size(
 static uint8_t ili9341_screen_rotation(
     ili9341_screen_orientation_t orientation);
 
-static uint32_t ili9341_spi_alloc_tx_block(ili9341_device_t *dev,
+static uint32_t ili9341_alloc_spi_tx_block(ili9341_device_t *dev,
     uint32_t tx_block_sz, uint8_t **tx_block);
-static void ili9341_spi_free_tx_block(ili9341_device_t *dev,
+static void ili9341_free_spi_tx_block(ili9341_device_t *dev,
     uint8_t **tx_block);
-static void ili9341_spi_init_tx_block(ili9341_device_t *dev,
+static void ili9341_init_spi_tx_block(ili9341_device_t *dev,
     uint32_t tx_block_sz, uint8_t **tx_block);
 
 static void ili9341_spi_tft_select(ili9341_device_t *dev);
@@ -86,7 +86,7 @@ static void ili9341_spi_write_data(ili9341_device_t *dev,
 static void ili9341_spi_write_command_data(ili9341_device_t *dev,
     ili9341_spi_slave_t spi_slave, uint8_t command, uint16_t data_sz, uint8_t data[]);
 
-static void ili9341_set_address_rectangle(ili9341_device_t *dev,
+static void ili9341_spi_tft_set_address_rect(ili9341_device_t *dev,
     uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 
 // ------------------------------------------------------- exported functions --
@@ -156,6 +156,10 @@ ili9341_device_t *ili9341_device_new(
                 {touch_coordinate_max_x},
                 {touch_coordinate_max_y} };
 
+            dev->touch_pressed        = ili9341_touch_pressed(dev);
+            dev->touch_pressed_begin  = NULL;
+            dev->touch_pressed_end    = NULL;
+
           } else {
 
             dev->touch_select_port    = NULL;
@@ -167,6 +171,9 @@ ili9341_device_t *ili9341_device_new(
             dev->touch_coordinate_min = (ili9341_two_dimension_t){ {0U}, {0U} };
             dev->touch_coordinate_max = (ili9341_two_dimension_t){ {0U}, {0U} };
 
+            dev->touch_pressed        = itpNONE;
+            dev->touch_pressed_begin  = NULL;
+            dev->touch_pressed_end    = NULL;
           }
 
           ili9341_initialize(dev);
@@ -180,7 +187,7 @@ ili9341_device_t *ili9341_device_new(
   return dev;
 }
 
-void ili9341_fill_rectangle(ili9341_device_t *dev, ili9341_color_t color,
+void ili9341_fill_rect(ili9341_device_t *dev, ili9341_color_t color,
     uint16_t x, uint16_t y, uint16_t w, uint16_t h)
 {
   // adjust bounds to clip any area outside screen dimensions:
@@ -200,22 +207,22 @@ void ili9341_fill_rectangle(ili9341_device_t *dev, ili9341_color_t color,
 
   // allocate largest block required to define rect
   uint8_t *block = NULL;
-  uint32_t block_sz = ili9341_spi_alloc_tx_block(dev, rect_sz, &block);
+  uint32_t block_sz = ili9341_alloc_spi_tx_block(dev, rect_sz, &block);
 
   // failed to allocate a usable block of memory
   if (0 == block_sz || NULL == block)
     { return; }
 
   // fill entire block with ordered color data
-  uint8_t msb = U16_MSBYTE(color);
-  uint8_t lsb = U16_LSBYTE(color);
+  uint8_t msb = __U16_MSBYTE(color);
+  uint8_t lsb = __U16_LSBYTE(color);
   for (uint16_t i = 0; i < block_sz; i += 2) {
     block[i + 0] = msb;
     block[i + 1] = lsb;
   }
 
   // select target region
-  ili9341_set_address_rectangle(dev, x, y, (x + w - 1), (y + h - 1));
+  ili9341_spi_tft_set_address_rect(dev, x, y, (x + w - 1), (y + h - 1));
   ili9341_spi_tft_select(dev);
 
   // repeatedly send MIN(remaining-size, block-size) bytes of color data until
@@ -231,13 +238,13 @@ void ili9341_fill_rectangle(ili9341_device_t *dev, ili9341_color_t color,
   }
 
   // cleanup, be sure to free the potentially-massive buffer
-  ili9341_spi_free_tx_block(dev, &block);
+  ili9341_free_spi_tx_block(dev, &block);
   ili9341_spi_tft_release(dev);
 }
 
 void ili9341_fill_screen(ili9341_device_t *dev, ili9341_color_t color)
 {
-  ili9341_fill_rectangle(dev, color,
+  ili9341_fill_rect(dev, color,
       0, 0, dev->screen_size.width, dev->screen_size.height);
 }
 
@@ -249,23 +256,26 @@ void ili9341_draw_char(ili9341_device_t *dev, uint16_t x, uint16_t y,
   uint32_t num_pixels = font->width * font->height;
   uint32_t rect_sz    = 2 * num_pixels;
 
-  uint8_t fg_msb = U16_MSBYTE(fg_color);
-  uint8_t fg_lsb = U16_MSBYTE(fg_color);
-  uint8_t bg_msb = U16_MSBYTE(bg_color);
-  uint8_t bg_lsb = U16_MSBYTE(bg_color);
+  uint8_t fg_msb = __U16_MSBYTE(fg_color);
+  uint8_t fg_lsb = __U16_LSBYTE(fg_color);
+  uint8_t bg_msb = __U16_MSBYTE(bg_color);
+  uint8_t bg_lsb = __U16_LSBYTE(bg_color);
   uint8_t msb, lsb;
 
   // allocate largest block required to define rect
   uint8_t *block = NULL;
-  uint32_t block_sz = ili9341_spi_alloc_tx_block(dev, rect_sz, &block);
+  uint32_t block_sz = ili9341_alloc_spi_tx_block(dev, rect_sz, &block);
 
   // failed to allocate a usable block of memory
   if (0 == block_sz || NULL == block)
     { return; }
 
+  ili9341_fill_rect(dev, bg_color, x, y, font->width, font->height);
+
   // initialize the buffer with glyph from selected font
+  uint8_t ch_index = glyph_index(ch);
   for (uint32_t yi = 0; yi < font->height; ++yi) {
-    uint32_t gl = (uint32_t)font->glyph[(ch - 32) * font->height + yi];
+    uint32_t gl = (uint32_t)font->glyph[ch_index * font->height + yi];
     for (uint32_t xi = 0; xi < font->width; ++xi) {
       if ((gl << xi) & 0x8000) {
         msb = fg_msb;
@@ -280,7 +290,7 @@ void ili9341_draw_char(ili9341_device_t *dev, uint16_t x, uint16_t y,
   }
 
   // select target region
-  ili9341_set_address_rectangle(dev, x, y, x + font->width - 1, y + font->height - 1);
+  ili9341_spi_tft_set_address_rect(dev, x, y, x + font->width - 1, y + font->height - 1);
   ili9341_spi_tft_select(dev);
 
   // transmit the character data in a single block transfer
@@ -288,7 +298,7 @@ void ili9341_draw_char(ili9341_device_t *dev, uint16_t x, uint16_t y,
   HAL_SPI_Transmit(dev->spi_hal, block, block_sz, __SPI_MAX_DELAY__);
 
   // cleanup, be sure to free the transmit buffer
-  ili9341_spi_free_tx_block(dev, &block);
+  ili9341_free_spi_tx_block(dev, &block);
   ili9341_spi_tft_release(dev);
 }
 
@@ -321,7 +331,64 @@ void ili9341_draw_string(ili9341_device_t *dev, uint16_t x, uint16_t y,
   }
 }
 
-// ------------------------------------------------------- private functions --
+void ili9341_touch_interrupt(ili9341_device_t *dev)
+{
+  // read the new/incoming state of the touch screen
+  ili9341_touch_pressed_t pressed = ili9341_touch_pressed(dev);
+
+  // switch path based on existing/prior state of the touch screen
+  switch (dev->touch_pressed) {
+    case itpNotPressed:
+      if (itpPressed == pressed) {
+        // state change, start of press
+        if (NULL != dev->touch_pressed_begin) {
+          dev->touch_pressed_begin(dev);
+        }
+      }
+      break;
+
+    case itpPressed:
+      if (itpNotPressed == pressed) {
+        // state change, end of press
+        if (NULL != dev->touch_pressed_end) {
+          dev->touch_pressed_end(dev);
+        }
+      }
+      break;
+
+    default:
+      break;
+  }
+
+  // update the internal state with current state of touch screen
+  if (pressed != dev->touch_pressed) {
+    dev->touch_pressed = pressed;
+  }
+}
+
+ili9341_touch_pressed_t ili9341_touch_pressed(ili9341_device_t *dev)
+{
+  if (__GPIO_PIN_CLR__ == HAL_GPIO_ReadPin(dev->touch_irq_port, dev->touch_irq_pin))
+    { return itpPressed; }
+  else
+    { return itpNotPressed; }
+}
+
+void ili9341_set_touch_pressed_begin(ili9341_device_t *dev, ili9341_touch_callback_t callback)
+{
+  if ((NULL != dev) && (NULL != callback)) {
+    dev->touch_pressed_begin = callback;
+  }
+}
+
+void ili9341_set_touch_pressed_end(ili9341_device_t *dev, ili9341_touch_callback_t callback)
+{
+  if ((NULL != dev) && (NULL != callback)) {
+    dev->touch_pressed_end = callback;
+  }
+}
+
+// -------------------------------------------------------- private functions --
 
 static void ili9341_reset(ili9341_device_t *dev)
 {
@@ -467,7 +534,7 @@ static uint8_t ili9341_screen_rotation(
   }
 }
 
-static uint32_t ili9341_spi_alloc_tx_block(ili9341_device_t *dev,
+static uint32_t ili9341_alloc_spi_tx_block(ili9341_device_t *dev,
     uint32_t tx_block_sz, uint8_t **tx_block)
 {
   if (tx_block_sz > __SPI_TX_BLOCK_SZ__)
@@ -482,7 +549,7 @@ static uint32_t ili9341_spi_alloc_tx_block(ili9341_device_t *dev,
   return tx_block_sz;
 }
 
-static void ili9341_spi_free_tx_block(ili9341_device_t *dev,
+static void ili9341_free_spi_tx_block(ili9341_device_t *dev,
     uint8_t **tx_block)
 {
 #if defined(__ILI9341_STATIC_MEM_ALLOC__)
@@ -492,7 +559,7 @@ static void ili9341_spi_free_tx_block(ili9341_device_t *dev,
 #endif
 }
 
-static void ili9341_spi_init_tx_block(ili9341_device_t *dev,
+static void ili9341_init_spi_tx_block(ili9341_device_t *dev,
     uint32_t tx_block_sz, uint8_t **tx_block)
 {
   if (NULL != *tx_block) {
@@ -579,7 +646,7 @@ static void ili9341_spi_write_command_data(ili9341_device_t *dev,
   __SLAVE_RELEASE(dev, spi_slave);
 }
 
-static void ili9341_set_address_rectangle(ili9341_device_t *dev,
+static void ili9341_spi_tft_set_address_rect(ili9341_device_t *dev,
     uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 {
   ili9341_spi_tft_select(dev);

@@ -43,7 +43,7 @@ extern "C" {
 
 // ----------------------------------------------------------- exported types --
 
-typedef HAL_StatusTypeDef ili9341_status_t;
+typedef struct ili9341_device ili9341_device_t;
 
 typedef struct
 {
@@ -85,6 +85,15 @@ ili9341_touch_support_t;
 
 typedef enum
 {
+  itpNONE = -1,
+  itpNotPressed, // = 0
+  itpPressed,    // = 1
+  itpCOUNT       // = 2
+}
+ili9341_touch_pressed_t;
+
+typedef enum
+{
   iwwNONE = -1,
   iwwTruncate, // = 0
   iwwCharWrap, // = 1
@@ -102,7 +111,11 @@ typedef enum
 }
 ili9341_spi_slave_t;
 
-typedef struct
+typedef void (*ili9341_touch_callback_t)(ili9341_device_t *);
+
+typedef HAL_StatusTypeDef ili9341_status_t;
+
+struct ili9341_device
 {
   SPI_HandleTypeDef *spi_hal;
 
@@ -124,8 +137,11 @@ typedef struct
   ili9341_touch_support_t touch_support;
   ili9341_two_dimension_t touch_coordinate_min;
   ili9341_two_dimension_t touch_coordinate_max;
-}
-ili9341_device_t;
+
+  ili9341_touch_pressed_t touch_pressed;
+  ili9341_touch_callback_t touch_pressed_begin;
+  ili9341_touch_callback_t touch_pressed_end;
+};
 
 // ------------------------------------------------------- exported variables --
 
@@ -159,7 +175,7 @@ ili9341_device_t *ili9341_device_new(
     uint16_t touch_coordinate_max_x,
     uint16_t touch_coordinate_max_y);
 
-void ili9341_fill_rectangle(ili9341_device_t *dev, ili9341_color_t color,
+void ili9341_fill_rect(ili9341_device_t *dev, ili9341_color_t color,
     uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 void ili9341_fill_screen(ili9341_device_t *dev, ili9341_color_t color);
 void ili9341_draw_char(ili9341_device_t *dev, uint16_t x, uint16_t y,
@@ -168,6 +184,12 @@ void ili9341_draw_char(ili9341_device_t *dev, uint16_t x, uint16_t y,
 void ili9341_draw_string(ili9341_device_t *dev, uint16_t x, uint16_t y,
     ili9341_font_t const *font, ili9341_color_t fg_color, ili9341_color_t bg_color,
     ili9341_word_wrap_t word_wrap, char str[]);
+
+void ili9341_touch_interrupt(ili9341_device_t *dev);
+ili9341_touch_pressed_t ili9341_touch_pressed(ili9341_device_t *dev);
+
+void ili9341_set_touch_pressed_begin(ili9341_device_t *dev, ili9341_touch_callback_t callback);
+void ili9341_set_touch_pressed_end(ili9341_device_t *dev, ili9341_touch_callback_t callback);
 
 #ifdef __cplusplus
 }

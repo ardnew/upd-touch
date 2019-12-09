@@ -62,6 +62,7 @@ void Error_Handler(void);
 #define TFT_DC_GPIO_Port GPIOB
 #define SYS_RESET_Pin GPIO_PIN_2
 #define SYS_RESET_GPIO_Port GPIOF
+#define SYS_RESET_EXTI_IRQn EXTI2_3_IRQn
 #define TFT_SCK_Pin GPIO_PIN_1
 #define TFT_SCK_GPIO_Port GPIOA
 #define STLINK_TX_Pin GPIO_PIN_2
@@ -74,6 +75,9 @@ void Error_Handler(void);
 #define TFT_MOSI_GPIO_Port GPIOA
 #define TFT_RESET_Pin GPIO_PIN_0
 #define TFT_RESET_GPIO_Port GPIOB
+#define USBPD_IRQ_Pin GPIO_PIN_1
+#define USBPD_IRQ_GPIO_Port GPIOB
+#define USBPD_IRQ_EXTI_IRQn EXTI0_1_IRQn
 #define TOUCH_CS_Pin GPIO_PIN_2
 #define TOUCH_CS_GPIO_Port GPIOB
 #define USBPD_RESET_Pin GPIO_PIN_8
@@ -88,9 +92,9 @@ void Error_Handler(void);
 #define SYS_SWDIO_GPIO_Port GPIOA
 #define SYS_SWCLK_Pin GPIO_PIN_14
 #define SYS_SWCLK_GPIO_Port GPIOA
-#define USBPD_IRQ_Pin GPIO_PIN_4
-#define USBPD_IRQ_GPIO_Port GPIOB
-#define USBPD_IRQ_EXTI_IRQn EXTI4_15_IRQn
+#define USBPD_ATCH_Pin GPIO_PIN_15
+#define USBPD_ATCH_GPIO_Port GPIOA
+#define USBPD_ATCH_EXTI_IRQn EXTI4_15_IRQn
 #define TFT_CS_Pin GPIO_PIN_5
 #define TFT_CS_GPIO_Port GPIOB
 #define GP_TX_Pin GPIO_PIN_6

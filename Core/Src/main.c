@@ -38,7 +38,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define NUM_STUSB4500_DEVICES 1
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -49,7 +49,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-stusb4500_device_t *usbpd[NUM_STUSB4500_DEVICES];
+stusb4500_device_t *usbpd;
 ili9341_device_t *screen;
 
 /* USER CODE END PV */
@@ -62,7 +62,16 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void screen_touch_begin(ili9341_device_t *dev)
+{
+  ; /* nothing */
+}
 
+void screen_touch_end(ili9341_device_t *dev)
+{
+  if (NULL != usbpd)
+    { stusb4500_reset(usbpd, srwWaitReady); }
+}
 /* USER CODE END 0 */
 
 /**
@@ -74,7 +83,7 @@ int main(void)
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
-  
+
 
   /* MCU Configuration--------------------------------------------------------*/
 
@@ -100,12 +109,12 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
 
-  usbpd[0] = stusb4500_device_new(&hi2c1, USBPD_RESET_GPIO_Port, USBPD_RESET_Pin, __STUSB4500_I2C_SLAVE_BASE_ADDR__);
+  usbpd = stusb4500_device_new(
+      &hi2c1,
+      __STUSB4500_I2C_SLAVE_BASE_ADDR__,
+      USBPD_RESET_GPIO_Port, USBPD_RESET_Pin);
 
-  while (HAL_OK != stusb4500_ready(usbpd[0]))
-    { continue ; }
-
-  stusb4500_cable_connected_t conn = stusb4500_cable_connected(usbpd[0]);
+  stusb4500_cable_connected_t conn = stusb4500_cable_connected(usbpd);
   switch (conn)
   {
     case sccNotConnected:
@@ -135,6 +144,9 @@ int main(void)
       itsSupported,
       1500, 3276, 31000, 30110);
 
+  ili9341_set_touch_pressed_begin(screen, screen_touch_begin);
+  ili9341_set_touch_pressed_end(screen, screen_touch_end);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -142,7 +154,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-
+    stusb4500_process_events(usbpd);
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -158,10 +170,10 @@ void SystemClock_Config(void)
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
   RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
-  /** Configure the main internal regulator output voltage 
+  /** Configure the main internal regulator output voltage
   */
   HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1);
-  /** Initializes the CPU, AHB and APB busses clocks 
+  /** Initializes the CPU, AHB and APB busses clocks
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
@@ -178,7 +190,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  /** Initializes the CPU, AHB and APB busses clocks 
+  /** Initializes the CPU, AHB and APB busses clocks
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1;
@@ -190,7 +202,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  /** Initializes the peripherals clocks 
+  /** Initializes the peripherals clocks
   */
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_I2C1;
   PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK1;
@@ -226,7 +238,7 @@ void Error_Handler(void)
   * @retval None
   */
 void assert_failed(uint8_t *file, uint32_t line)
-{ 
+{
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line number,
      tex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
