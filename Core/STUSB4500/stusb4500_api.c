@@ -18,6 +18,7 @@
 #define __STUSB4500_I2C_WRITE_TIMEOUT_MS__  2000
 #define __STUSB4500_DEVICE_ID__             0x21 // in device ID register (0x2F)
 #define __STUSB4500_TLOAD_REG_INIT_MS__      250 // section 6.1.3 in datasheet
+#define __STUSB4500_SW_RESET_DEBOUNCE_MS__    50
 
 #define __GPIO_PIN_CLR__                  GPIO_PIN_RESET
 #define __GPIO_PIN_SET__                  GPIO_PIN_SET
@@ -34,16 +35,21 @@
 #define __U16_LSBYTE(u) (uint8_t)(((uint16_t)(u)      ) & 0xFF)
 
 // convert value at addr to little-endian (16-bit)
-#define __U16_LEND(addr)                                \
-  ( ( (((uint16_t)(*(((uint8_t *)(addr)) + 0)))     ) + \
-      (((uint16_t)(*(((uint8_t *)(addr)) + 1))) << 8) ) )
+#define __U16_LEND(addr)                                  \
+    ( ( (((uint16_t)(*(((uint8_t *)(addr)) + 0)))     ) + \
+        (((uint16_t)(*(((uint8_t *)(addr)) + 1))) << 8) ) )
 
 // convert value at addr to little-endian (32-bit)
-#define __U32_LEND(addr)                                 \
-  ( ( (((uint32_t)(*(((uint8_t *)(addr)) + 0)))      ) + \
-      (((uint32_t)(*(((uint8_t *)(addr)) + 1))) <<  8) + \
-      (((uint32_t)(*(((uint8_t *)(addr)) + 2))) << 16) + \
-      (((uint32_t)(*(((uint8_t *)(addr)) + 3))) << 24) ) )
+#define __U32_LEND(addr)                                   \
+    ( ( (((uint32_t)(*(((uint8_t *)(addr)) + 0)))      ) + \
+        (((uint32_t)(*(((uint8_t *)(addr)) + 1))) <<  8) + \
+        (((uint32_t)(*(((uint8_t *)(addr)) + 2))) << 16) + \
+        (((uint32_t)(*(((uint8_t *)(addr)) + 3))) << 24) ) )
+
+#define __NO_INTERRUPT(e) { __disable_irq(); (e); __enable_irq(); }
+
+#define __CABLE_CONNECTED(c) \
+    ((sccCC1Connected == (c)) || (sccCC2Connected == (c)))
 
 // ------------------------------------------------------------ private types --
 
@@ -83,8 +89,12 @@ static stusb4500_status_t stusb4500_i2c_write(stusb4500_device_t *dev,
     uint16_t mem_addr, uint8_t *buff_src, uint16_t buff_src_sz);
 
 static stusb4500_status_t stusb4500_clear_all_alerts(stusb4500_device_t *dev);
+static stusb4500_status_t stusb4500_read_port_status(stusb4500_device_t *dev);
+static stusb4500_status_t stusb4500_get_all_sink_pdo(stusb4500_device_t *dev);
+static stusb4500_status_t stusb4500_set_num_sink_pdo(stusb4500_device_t *dev,
+    uint8_t count);
 
-static stusb4500_status_t stusb4500_usbpd_soft_reset(stusb4500_device_t *dev);
+static stusb4500_status_t stusb4500_usbpd_cable_reset(stusb4500_device_t *dev);
 //static stusb4500_get_source_capabilities(stusb4500_device_t *dev);
 
 static stusb4500_status_t stusb4500_usbpd_push_message(stusb4500_device_t *dev,
@@ -126,6 +136,11 @@ stusb4500_device_t *stusb4500_device_new(
         .cc_status.d8           = 0U,
         .prt_status.d8          = 0U,
         .phy_status.d8          = 0U,
+
+        .pdo_snk = { { 0U } },
+        .pdo_src = { { 0U } },
+
+        .rdo_neg = { 0U },
       };
 
       dev->usbpd_state_machine = (stusb4500_usbpd_state_machine_t){
@@ -147,12 +162,40 @@ stusb4500_device_t *stusb4500_device_new(
         .irq_head = 0U,
         .irq_tail = 0U,
       };
-
-      stusb4500_reset(dev, srwWaitReady);
     }
   }
 
   return dev;
+}
+
+stusb4500_status_t stusb4500_device_init(stusb4500_device_t *dev)
+{
+  if (NULL == dev)
+    { return HAL_ERROR; }
+
+  stusb4500_cable_connected_t conn = stusb4500_cable_connected(dev);
+  stusb4500_status_t stat;
+
+  if (HAL_OK != (stat = stusb4500_clear_all_alerts(dev)))
+    { return stat; }
+
+  if (!__CABLE_CONNECTED(conn)) {
+    stusb4500_hard_reset(dev, srwWaitReady);
+    if (HAL_OK != (stat = stusb4500_get_all_sink_pdo(dev)))
+      { return stat; }
+    if (HAL_OK != (stat = stusb4500_read_port_status(dev)))
+      { return stat; }
+    if (HAL_OK != (stat = stusb4500_set_num_sink_pdo(dev, 1)))
+      { return stat; }
+  }
+  else {
+    stusb4500_wait_until_ready(dev);
+  }
+
+  if (HAL_OK != (stat = stusb4500_clear_all_alerts(dev)))
+    { return stat; }
+
+  return stusb4500_usbpd_cable_reset(dev);
 }
 
 stusb4500_status_t stusb4500_ready(stusb4500_device_t *dev)
@@ -178,13 +221,14 @@ void stusb4500_wait_until_ready(stusb4500_device_t *dev)
     { continue ; }
 }
 
-void stusb4500_reset(stusb4500_device_t *dev, stusb4500_reset_wait_t wait)
+void stusb4500_hard_reset(stusb4500_device_t *dev, stusb4500_reset_wait_t wait)
 {
   // the reset pin on STUSB4500 is active high, so driving high temporarily
   // will reset the device
   HAL_GPIO_WritePin(dev->reset_port, dev->reset_pin, __GPIO_PIN_SET__);
-  HAL_Delay(200);
+  HAL_Delay(25);
   HAL_GPIO_WritePin(dev->reset_port, dev->reset_pin, __GPIO_PIN_CLR__);
+  HAL_Delay(25);
 
   switch (wait) {
     case srwWaitReady:
@@ -192,8 +236,6 @@ void stusb4500_reset(stusb4500_device_t *dev, stusb4500_reset_wait_t wait)
       HAL_Delay(__STUSB4500_TLOAD_REG_INIT_MS__);
       // second, try querying the device
       stusb4500_wait_until_ready(dev);
-      stusb4500_clear_all_alerts(dev);
-      stusb4500_usbpd_soft_reset(dev);
       break;
 
     case srwDoNotWait:
@@ -202,24 +244,44 @@ void stusb4500_reset(stusb4500_device_t *dev, stusb4500_reset_wait_t wait)
   }
 }
 
+void stusb4500_soft_reset(stusb4500_device_t *dev, stusb4500_reset_wait_t wait)
+{
+  uint8_t buff_src = SW_RST;
+  stusb4500_status_t stat =
+      stusb4500_i2c_write(dev, STUSB_GEN1S_RESET_CTRL_REG, &buff_src, 1);
+  if (HAL_OK != stat)
+    { return; }
+
+  stusb4500_clear_all_alerts(dev);
+
+  HAL_Delay(__STUSB4500_SW_RESET_DEBOUNCE_MS__);
+
+  // restore reset control register to listen only on hardware reset pin
+  buff_src = No_SW_RST;
+  stat = stusb4500_i2c_write(dev, STUSB_GEN1S_RESET_CTRL_REG, &buff_src, 1);
+  if (HAL_OK != stat)
+    { return; } // not superfluous, used for debugging
+}
+
 void stusb4500_process_events(stusb4500_device_t *dev)
 {
+  uint8_t irq;
+  uint8_t msg;
+  uint8_t value;
+
   if (NULL == dev)
     { return; }
 
   stusb4500_usbpd_state_machine_t *usm = &(dev->usbpd_state_machine);
   while (0U != usm->irq_received) {
-    __disable_irq();
     --(usm->irq_received);
-    __enable_irq();
-    uint8_t irq;
+    //__NO_INTERRUPT(--(usm->irq_received));
     stusb4500_usbpd_pop_interrupt(dev, &irq);
   }
 
   if (0U != usm->attach_transition) {
-    __disable_irq();
-    --(usm->attach_transition);
-    __enable_irq();
+    //--(usm->attach_transition);
+    __NO_INTERRUPT(--(usm->attach_transition));
 
     if (VALUE_ATTACHED ==
         (dev->usbpd_status.cc_detection_status.d8 & STUSBMASK_ATTACHED_STATUS)) {
@@ -231,11 +293,9 @@ void stusb4500_process_events(stusb4500_device_t *dev)
   }
 
   if (0U != usm->msg_received) {
-    __disable_irq();
     --(usm->msg_received);
-    __enable_irq();
-    uint8_t msg;
-    uint8_t value;
+    //__NO_INTERRUPT(--(usm->msg_received));
+
     while (HAL_ERROR != stusb4500_usbpd_pop_message(dev, &msg)) {
       switch (msg) {
         case __STUSB4500_USBPD_MESSAGE_TYPE_CTRL__:
@@ -257,15 +317,13 @@ void stusb4500_process_events(stusb4500_device_t *dev)
   }
 
   if (0U != usm->src_pdo_received) {
-    __disable_irq();
-    --(usm->src_pdo_received);
-    __enable_irq();
+    //--(usm->src_pdo_received);
+    __NO_INTERRUPT(--(usm->src_pdo_received));
   }
 
   if (0U != usm->psrdy_received) {
-    __disable_irq();
     --(usm->psrdy_received);
-    __enable_irq();
+    //__NO_INTERRUPT(--(usm->psrdy_received));
   }
 }
 
@@ -349,6 +407,7 @@ void stusb4500_alert(stusb4500_device_t *dev)
 
           stusb4500_usbpd_push_value(dev,
               __STUSB4500_USBPD_MESSAGE_TYPE_DATA__, header.b.message_type);
+
           stat = stusb4500_i2c_read(dev, RX_BYTE_CNT, read_buff, 1U);
           if (HAL_OK != stat)
             { return; }
@@ -364,7 +423,7 @@ void stusb4500_alert(stusb4500_device_t *dev)
                 { return; }
 
               for (uint8_t i = 0, j = 0; i < header.b.data_object_count; ++i, j += 4) {
-                uint32_t pdo = __U32_LEND(&read_buff[j]);
+                dev->usbpd_status.pdo_src[i].d32 = __U32_LEND(&read_buff[j]);
               }
 
               ++(dev->usbpd_state_machine.src_pdo_received);
@@ -381,7 +440,6 @@ void stusb4500_alert(stusb4500_device_t *dev)
 
           stusb4500_usbpd_push_value(dev,
               __STUSB4500_USBPD_MESSAGE_TYPE_CTRL__, header.b.message_type);
-
 
           switch (header.b.message_type) {
             case USBPD_CTRLMSG_GoodCRC:
@@ -456,6 +514,16 @@ stusb4500_cable_connected_t stusb4500_cable_connected(stusb4500_device_t *dev)
   }
 }
 
+stusb4500_status_t stusb4500_get_source_capabilities(stusb4500_device_t *dev)
+{
+  if (NULL == dev)
+    { return HAL_ERROR; }
+
+  stusb4500_status_t stat = stusb4500_usbpd_cable_reset(dev);
+  if (HAL_OK != stat)
+    { return stat; }
+}
+
 // -------------------------------------------------------- private functions --
 
 static stusb4500_status_t stusb4500_i2c_read(stusb4500_device_t *dev,
@@ -497,7 +565,7 @@ static stusb4500_status_t stusb4500_clear_all_alerts(stusb4500_device_t *dev)
 {
   stusb4500_status_t stat;
 
-  // read all registers to clear
+  // read all registers to clear alerts
   uint8_t alert_status;
   for (uint16_t i = 0; i <= 12; ++i)
   {
@@ -520,16 +588,59 @@ static stusb4500_status_t stusb4500_clear_all_alerts(stusb4500_device_t *dev)
   return stusb4500_i2c_write(dev, ALERT_STATUS_MASK, &(alert_mask.d8), 1U);
 }
 
-static stusb4500_status_t stusb4500_usbpd_soft_reset(stusb4500_device_t *dev)
+static stusb4500_status_t stusb4500_read_port_status(stusb4500_device_t *dev)
+{
+#define BUFF_SZ 10
+  uint8_t prt_buff[BUFF_SZ];
+
+  stusb4500_status_t stat = stusb4500_i2c_read(dev, REG_PORT_STATUS, prt_buff, BUFF_SZ);
+  if (HAL_OK != stat)
+    { return stat; }
+
+  dev->usbpd_status.cc_detection_status.d8 = prt_buff[1];
+  dev->usbpd_status.cc_status.d8           = prt_buff[3];
+  dev->usbpd_status.monitoring_status.d8   = prt_buff[3];
+  dev->usbpd_status.hw_fault_status.d8     = prt_buff[6];
+
+  return HAL_OK;
+#undef BUFF_SZ
+}
+
+static stusb4500_status_t stusb4500_get_all_sink_pdo(stusb4500_device_t *dev)
+{
+#define BUFF_SZ __STUSB4500_NVM_SINK_PDO_COUNT__ * sizeof(USB_PD_SNK_PDO_TypeDef)
+  uint8_t pdo_buff[BUFF_SZ];
+
+  stusb4500_status_t stat = stusb4500_i2c_read(dev, DPM_SNK_PDO1, pdo_buff, BUFF_SZ);
+  if (HAL_OK != stat)
+    { return stat; }
+
+  for (uint8_t i = 0, j = 0; i < __STUSB4500_NVM_SINK_PDO_COUNT__; ++i, j += 4) {
+    dev->usbpd_status.pdo_snk[i].d32 = __U32_LEND(&pdo_buff[j]);
+  }
+  return HAL_OK;
+#undef BUFF_SZ
+}
+
+static stusb4500_status_t stusb4500_set_num_sink_pdo(stusb4500_device_t *dev,
+    uint8_t count)
+{
+  if ((count < 1) || (count > __STUSB4500_NVM_SINK_PDO_COUNT__))
+    { return HAL_ERROR; }
+
+  return stusb4500_i2c_write(dev, DPM_PDO_NUMB, &count, 1);
+}
+
+static stusb4500_status_t stusb4500_usbpd_cable_reset(stusb4500_device_t *dev)
 {
 #define USBPD_HEADER_SOFT_RESET 0x000D
 #define USBPD_PD_COMMAND        0x26
-#define USBPD_RESET_TIMEOUT_MS  1000 // milliseconds
+#define USBPD_RESET_TIMEOUT_MS  20000 // milliseconds
 
   stusb4500_cable_connected_t conn = stusb4500_cable_connected(dev);
 
   // only continue if the cable is connected
-  if ((sccCC1Connected != conn) && (sccCC2Connected != conn))
+  if (!__CABLE_CONNECTED(conn))
     { return HAL_ERROR; }
 
   stusb4500_status_t stat;
@@ -537,16 +648,17 @@ static stusb4500_status_t stusb4500_usbpd_soft_reset(stusb4500_device_t *dev)
   // send PD message "soft reset" to source by setting TX header (0x51) to 0x0D,
   // and set PD command (0x1A) to 0x26.
   uint8_t soft_reset_data[2] = {
-    __U16_MSBYTE(USBPD_HEADER_SOFT_RESET),
-    __U16_LSBYTE(USBPD_HEADER_SOFT_RESET)
+    __U16_LSBYTE(USBPD_HEADER_SOFT_RESET),
+    __U16_MSBYTE(USBPD_HEADER_SOFT_RESET)
   };
   stat = stusb4500_i2c_write(dev, TX_HEADER, soft_reset_data, sizeof(soft_reset_data));
   if (HAL_OK != stat)
     { return stat; }
 
   stusb4500_usbpd_state_machine_t *usm = &(dev->usbpd_state_machine);
-  usm->msg_accept = 0U;
-  usm->msg_reject = 0U;
+  usm->msg_accept     = 0U;
+  usm->msg_reject     = 0U;
+  usm->psrdy_received = 0U;
 
   uint32_t timeout_start = HAL_GetTick();
   uint8_t timeout = 0U;
@@ -556,7 +668,9 @@ static stusb4500_status_t stusb4500_usbpd_soft_reset(stusb4500_device_t *dev)
   if (HAL_OK != stat)
     { return stat; }
 
-  while ((0U == usm->msg_accept) && (0U == usm->msg_reject)) {
+  while ( (0U == usm->msg_accept)     &&
+          (0U == usm->msg_reject)     &&
+          (0U == usm->psrdy_received) ) {
     if ((HAL_GetTick() - timeout_start) > USBPD_RESET_TIMEOUT_MS) {
       timeout = 1U;
       break;
@@ -574,6 +688,7 @@ static stusb4500_status_t stusb4500_usbpd_soft_reset(stusb4500_device_t *dev)
 
 #undef USBPD_HEADER_SOFT_RESET
 #undef USBPD_PD_COMMAND
+#undef USBPD_RESET_TIMEOUT_MS
 }
 
 static stusb4500_status_t stusb4500_usbpd_push_message(stusb4500_device_t *dev,

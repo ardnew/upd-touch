@@ -151,6 +151,7 @@ void EXTI0_1_IRQHandler(void)
   /* USER CODE BEGIN EXTI0_1_IRQn 0 */
 
   /* USER CODE END EXTI0_1_IRQn 0 */
+  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_0);
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_1);
   /* USER CODE BEGIN EXTI0_1_IRQn 1 */
 
@@ -180,7 +181,6 @@ void EXTI4_15_IRQHandler(void)
 
   /* USER CODE END EXTI4_15_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_8);
-  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_15);
   /* USER CODE BEGIN EXTI4_15_IRQn 1 */
 
   /* USER CODE END EXTI4_15_IRQn 1 */
@@ -224,6 +224,10 @@ void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
   switch (GPIO_Pin) {
     case TOUCH_IRQ_Pin:
       ili9341_touch_interrupt(screen);
+      break;
+
+    case USBPD_ATCH_Pin:
+      stusb4500_attach(usbpd);
       break;
   }
 }

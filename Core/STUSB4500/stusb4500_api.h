@@ -35,6 +35,8 @@ extern "C" {
 #define __STUSB4500_USBPD_REV_3_0_SUPPORT__    1
 #define __STUSB4500_USBPD_MESSAGE_QUEUE_SZ__   32
 #define __STUSB4500_USBPD_INTERRUPT_QUEUE_SZ__ 32
+#define __STUSB4500_NVM_SINK_PDO_COUNT__       3
+#define __STUSB4500_NVM_SOURCE_PDO_MAX__       10
 
 // ------------------------------------------------------------------- macros --
 
@@ -76,6 +78,11 @@ struct stusb4500_usbpd_status
     STUSB_GEN1S_CC_STATUS_RegTypeDef           cc_status;           // 8-bit
     STUSB_GEN1S_PRT_STATUS_RegTypeDef          prt_status;          // 8-bit
     STUSB_GEN1S_PHY_STATUS_RegTypeDef          phy_status;          // 8-bit
+
+    USB_PD_SNK_PDO_TypeDef pdo_snk[__STUSB4500_NVM_SINK_PDO_COUNT__];
+    USB_PD_SRC_PDO_TypeDef pdo_src[__STUSB4500_NVM_SOURCE_PDO_MAX__];
+
+    STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo_neg;
 };
 
 struct stusb4500_usbpd_state_machine
@@ -123,13 +130,20 @@ stusb4500_device_t *stusb4500_device_new(
     GPIO_TypeDef      *reset_port,
     uint16_t           reset_pin);
 
+stusb4500_status_t stusb4500_device_init(stusb4500_device_t *dev);
 stusb4500_status_t stusb4500_ready(stusb4500_device_t *dev);
+
 void stusb4500_wait_until_ready(stusb4500_device_t *dev);
-void stusb4500_reset(stusb4500_device_t *dev, stusb4500_reset_wait_t wait);
+void stusb4500_hard_reset(stusb4500_device_t *dev, stusb4500_reset_wait_t wait);
+void stusb4500_soft_reset(stusb4500_device_t *dev, stusb4500_reset_wait_t wait);
+
 void stusb4500_process_events(stusb4500_device_t *dev);
 void stusb4500_alert(stusb4500_device_t *dev);
 void stusb4500_attach(stusb4500_device_t *dev);
+
 stusb4500_cable_connected_t stusb4500_cable_connected(stusb4500_device_t *dev);
+stusb4500_status_t stusb4500_get_source_capabilities(stusb4500_device_t *dev);
+
 
 #ifdef __cplusplus
 }

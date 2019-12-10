@@ -56,6 +56,7 @@ ili9341_device_t *screen;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+static void MX_NVIC_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -70,7 +71,7 @@ void screen_touch_begin(ili9341_device_t *dev)
 void screen_touch_end(ili9341_device_t *dev)
 {
   if (NULL != usbpd)
-    { stusb4500_reset(usbpd, srwWaitReady); }
+    { stusb4500_get_source_capabilities(usbpd); }
 }
 /* USER CODE END 0 */
 
@@ -83,7 +84,7 @@ int main(void)
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
-
+  
 
   /* MCU Configuration--------------------------------------------------------*/
 
@@ -107,31 +108,16 @@ int main(void)
   MX_I2C1_Init();
   MX_USART1_UART_Init();
   MX_SPI1_Init();
+
+  /* Initialize interrupts */
+  MX_NVIC_Init();
   /* USER CODE BEGIN 2 */
 
   usbpd = stusb4500_device_new(
       &hi2c1,
       __STUSB4500_I2C_SLAVE_BASE_ADDR__,
       USBPD_RESET_GPIO_Port, USBPD_RESET_Pin);
-
-  stusb4500_cable_connected_t conn = stusb4500_cable_connected(usbpd);
-  switch (conn)
-  {
-    case sccNotConnected:
-      break;
-
-    case sccCC1Connected:
-      break;
-
-    case sccCC2Connected:
-      break;
-
-    case sccERROR:
-    case sccCOUNT:
-    default:
-      while (1)
-        { continue ; }
-  }
+  stusb4500_device_init(usbpd);
 
   screen = ili9341_device_new(
       &hspi1,
@@ -153,8 +139,9 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
     stusb4500_process_events(usbpd);
+    /* USER CODE END WHILE */
+
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -170,10 +157,10 @@ void SystemClock_Config(void)
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
   RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
-  /** Configure the main internal regulator output voltage
+  /** Configure the main internal regulator output voltage 
   */
   HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1);
-  /** Initializes the CPU, AHB and APB busses clocks
+  /** Initializes the CPU, AHB and APB busses clocks 
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
@@ -190,7 +177,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  /** Initializes the CPU, AHB and APB busses clocks
+  /** Initializes the CPU, AHB and APB busses clocks 
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1;
@@ -202,7 +189,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  /** Initializes the peripherals clocks
+  /** Initializes the peripherals clocks 
   */
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_I2C1;
   PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK1;
@@ -211,6 +198,23 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief NVIC Configuration.
+  * @retval None
+  */
+static void MX_NVIC_Init(void)
+{
+  /* EXTI2_3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(EXTI2_3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI2_3_IRQn);
+  /* EXTI0_1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(EXTI0_1_IRQn, 1, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_1_IRQn);
+  /* EXTI4_15_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(EXTI4_15_IRQn, 1, 0);
+  HAL_NVIC_EnableIRQ(EXTI4_15_IRQn);
 }
 
 /* USER CODE BEGIN 4 */
@@ -238,7 +242,7 @@ void Error_Handler(void)
   * @retval None
   */
 void assert_failed(uint8_t *file, uint32_t line)
-{
+{ 
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line number,
      tex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
