@@ -148,7 +148,10 @@ stusb4500_device_t *stusb4500_device_new(
         .prt_status.d8          = 0U,
         .phy_status.d8          = 0U,
 
+        .pdo_snk_count = 0U,
         .pdo_snk = { { 0U } },
+
+        .pdo_src_count = 0U,
         .pdo_src = { { 0U } },
 
         .rdo_neg = { 0U },
@@ -191,12 +194,16 @@ stusb4500_status_t stusb4500_device_init(stusb4500_device_t *dev)
   if (NULL == dev)
     { return HAL_ERROR; }
 
-  stusb4500_wait_until_ready(dev);
+  //stusb4500_wait_until_ready(dev);
+  stusb4500_soft_reset(dev, srwWaitReady);
 
   if (HAL_OK != (stat = stusb4500_clear_all_alerts(dev, suaUnmaskAlerts)))
     { return stat; }
 
   if (HAL_OK != (stat = stusb4500_read_port_status(dev)))
+    { return stat; }
+
+  if (HAL_OK != (stat = stusb4500_get_source_capabilities(dev)))
     { return stat; }
 
   return HAL_OK;
@@ -288,6 +295,19 @@ void stusb4500_soft_reset(stusb4500_device_t *dev, stusb4500_reset_wait_t wait)
   stat = stusb4500_i2c_write(dev, STUSB_GEN1S_RESET_CTRL_REG, &buff_src, 1);
   if (HAL_OK != stat)
     { return; } // not superfluous, used for debugging
+
+  switch (wait) {
+    case srwWaitReady:
+      // first, wait for I2C registers to be initialized from NVM
+      HAL_Delay(__STUSB4500_TLOAD_REG_INIT_MS__);
+      // second, try querying the device
+      stusb4500_wait_until_ready(dev);
+      break;
+
+    case srwDoNotWait:
+    default:
+      break;
+  }
 }
 
 void stusb4500_process_events(stusb4500_device_t *dev)
@@ -346,6 +366,10 @@ void stusb4500_process_events(stusb4500_device_t *dev)
   if (0U != usm->src_pdo_received) {
     //--(usm->src_pdo_received);
     __NO_INTERRUPT(--(usm->src_pdo_received));
+
+    if (NULL != dev->source_capabilities_received) {
+      dev->source_capabilities_received(dev);
+    }
   }
 
   if (0U != usm->psrdy_received) {
@@ -449,6 +473,7 @@ void stusb4500_alert(stusb4500_device_t *dev)
               if (HAL_OK != stat)
                 { return; }
 
+              dev->usbpd_status.pdo_src_count = header.b.data_object_count;
               for (uint8_t i = 0, j = 0; i < header.b.data_object_count; ++i, j += 4) {
                 dev->usbpd_status.pdo_src[i].d32 = __U32_LEND(&read_buff[j]);
               }
@@ -557,6 +582,13 @@ stusb4500_status_t stusb4500_get_source_capabilities(stusb4500_device_t *dev)
     { return stat; }
 
   return HAL_OK;
+}
+
+void stusb4500_set_source_capabilities_received(stusb4500_device_t *dev, stusb4500_event_callback_t callback)
+{
+  if ((NULL != dev) && (NULL != callback)) {
+    dev->source_capabilities_received = callback;
+  }
 }
 
 // -------------------------------------------------------- private functions --

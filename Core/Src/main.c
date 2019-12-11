@@ -29,6 +29,8 @@
 /* USER CODE BEGIN Includes */
 #include "stusb4500_api.h"
 #include "ili9341_api.h"
+
+#include <stdio.h> // snprintf
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -72,6 +74,28 @@ void screen_touch_end(ili9341_device_t *dev)
 {
   if (NULL != usbpd)
     { stusb4500_get_source_capabilities(usbpd); }
+}
+
+void source_capabilities_received(stusb4500_device_t *dev)
+{
+  if (NULL != screen) {
+
+    char pdo_str[32];
+    float volts;
+    float amps;
+    uint16_t watts;
+
+    for (uint8_t i = 0; i < dev->usbpd_status.pdo_src_count; ++i) {
+
+      volts = (float)(dev->usbpd_status.pdo_src[i].fix.Voltage) / 20.0F;
+      amps  = (float)(dev->usbpd_status.pdo_src[i].fix.Max_Operating_Current) / 100.0F;
+      watts = (int)(volts * amps);
+
+      snprintf(pdo_str, 32, "(%u) %4.1fV, %3.1fA [%uW]", i + 1, volts, amps, watts);
+
+      ili9341_draw_string(screen, 2, 20 + 20 * i, &ili9341_font_11x18, ILI9341_WHITE, ILI9341_BLACK, iwwTruncate, pdo_str);
+    }
+  }
 }
 /* USER CODE END 0 */
 
@@ -117,6 +141,9 @@ int main(void)
       &hi2c1,
       __STUSB4500_I2C_SLAVE_BASE_ADDR__,
       USBPD_RESET_GPIO_Port, USBPD_RESET_Pin);
+
+  stusb4500_set_source_capabilities_received(usbpd, source_capabilities_received);
+
   stusb4500_device_init(usbpd);
 
   screen = ili9341_device_new(
@@ -124,7 +151,7 @@ int main(void)
       TFT_RESET_GPIO_Port, TFT_RESET_Pin,
       TFT_CS_GPIO_Port,    TFT_CS_Pin,
       TFT_DC_GPIO_Port,    TFT_DC_Pin,
-      isoPortraitFlip,
+      isoPortrait,
       TOUCH_CS_GPIO_Port,  TOUCH_CS_Pin,
       TOUCH_IRQ_GPIO_Port, TOUCH_IRQ_Pin,
       itsSupported,

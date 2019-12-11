@@ -32,7 +32,7 @@ extern "C" {
 
 #define __STUSB4500_I2C_SLAVE_BASE_ADDR__ 0x28
 
-//#define __STUSB4500_USBPD_REV_3_0_SUPPORT__    1
+#define __STUSB4500_USBPD_REV_3_0_SUPPORT__    1
 #define __STUSB4500_USBPD_MESSAGE_QUEUE_SZ__   32
 #define __STUSB4500_USBPD_INTERRUPT_QUEUE_SZ__ 32
 #define __STUSB4500_NVM_SINK_PDO_COUNT__       3
@@ -67,6 +67,8 @@ typedef enum
 }
 stusb4500_reset_wait_t;
 
+typedef void (*stusb4500_event_callback_t)(stusb4500_device_t *);
+
 typedef HAL_StatusTypeDef stusb4500_status_t;
 
 struct stusb4500_usbpd_status
@@ -79,7 +81,10 @@ struct stusb4500_usbpd_status
     STUSB_GEN1S_PRT_STATUS_RegTypeDef          prt_status;          // 8-bit
     STUSB_GEN1S_PHY_STATUS_RegTypeDef          phy_status;          // 8-bit
 
+    uint8_t pdo_snk_count;
     USB_PD_SNK_PDO_TypeDef pdo_snk[__STUSB4500_NVM_SINK_PDO_COUNT__];
+
+    uint8_t pdo_src_count;
     USB_PD_SRC_PDO_TypeDef pdo_src[__STUSB4500_NVM_SOURCE_PDO_MAX__];
 
     STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo_neg;
@@ -116,6 +121,8 @@ struct stusb4500_device
 
   stusb4500_usbpd_status_t        usbpd_status;
   stusb4500_usbpd_state_machine_t usbpd_state_machine;
+
+  stusb4500_event_callback_t source_capabilities_received;
 };
 
 // ------------------------------------------------------- exported variables --
@@ -144,6 +151,7 @@ void stusb4500_attach(stusb4500_device_t *dev);
 stusb4500_cable_connected_t stusb4500_cable_connected(stusb4500_device_t *dev);
 stusb4500_status_t stusb4500_get_source_capabilities(stusb4500_device_t *dev);
 
+void stusb4500_set_source_capabilities_received(stusb4500_device_t *dev, stusb4500_event_callback_t callback);
 
 #ifdef __cplusplus
 }

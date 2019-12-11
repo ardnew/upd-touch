@@ -178,7 +178,6 @@ ili9341_device_t *ili9341_device_new(
 
           ili9341_initialize(dev);
           ili9341_fill_screen(dev, ILI9341_BLACK);
-          ili9341_draw_string(dev, 45, 125, &ili9341_font_11x18, ILI9341_WHITE, ILI9341_BLACK, iwwTruncate, "Hello!");
         }
       }
     }
