@@ -416,6 +416,28 @@ typedef enum
   SW_RST    = 1  /*!< Force the device reset as long as this bit value is set */
 } SW_RESET_TypeDef;
 
+#define PE_FSM 0x29
+/* PE STATES */
+#define PE_SOFT_RESET                        0x01          //     "00000001"
+#define PE_HARD_RESET                        0x02           //     "00000010"
+#define PE_SEND_SOFT_RESET                   0x03           //     "00000011"
+#define PE_BIST_CARRIER_MODE                 0x04           //     "00000100"
+
+#define PE_SNK_STARTUP                       0x12           //     "00010010"
+#define PE_SNK_DISCOVERY                     0x13           //     "00010011"
+#define PE_SNK_WAIT_FOR_CAPABILITIES         0x14           //     "00010100"
+#define PE_SNK_EVALUATE_CAPABILITIES         0x15           //     "00010101"
+#define PE_SNK_SELECT_CAPABILITIES           0x16           //     "00010110"
+#define PE_SNK_TRANSITION_SINK               0x17           //     "00010111"
+#define PE_SNK_READY                         0x18           //     "00011000"
+#define PE_SNK_READY_SENDING                 0x19           //     "00011001"
+#define PE_DB_CP_CHECK_FOR_VBUS              0x1A           //     "00011010"
+// 0x19 -- 0x29 reserved
+#define PE_ERRORRECOVERY                     0x30           //     "00110000"
+#define PE_SRC_TRANSITION_SUPPLY_3           0x31           //     "00110001"
+#define PE_SRC_TRANSITION_SUPPLY_2B          0x31           //     "00110001"
+#define PE_SRC_GET_SINK_CAP                  0x31           //
+
 #define RX_BYTE_CNT  0x30
 #define RX_HEADER    0x31 // RX message header (16bit)
 #define RX_DATA_OBJ  0x33
