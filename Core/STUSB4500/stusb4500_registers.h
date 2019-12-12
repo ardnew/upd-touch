@@ -469,7 +469,7 @@ typedef union
   uint32_t d32;
   struct
   {
-    uint32_t Operationnal_Current       : 10;
+    uint32_t Operational_Current        : 10;
     uint32_t Voltage                    : 10;
     uint8_t  Reserved_22_20             :  3;
     uint8_t  Fast_Role_Req_cur          :  2;  /* must be set to 0 in 2.0 */
@@ -496,6 +496,10 @@ typedef union
   } bat;
 
 } USB_PD_SNK_PDO_TypeDef;
+
+#define PDO_SNK_FIX_FIXED    0
+#define PDO_SNK_FIX_VARIABLE 1
+#define PDO_SNK_FIX_BATTERY  2
 
 typedef union
 {

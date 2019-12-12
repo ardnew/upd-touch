@@ -65,6 +65,80 @@ static void MX_NVIC_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+void draw_pdo_src_all(ili9341_device_t *scr, stusb4500_device_t *usb)
+{
+#define Y_START 20
+
+  if ((NULL != scr) && (NULL != usb)) {
+
+    char pdo_str[32];
+    float volts;
+    float amps;
+    uint16_t watts;
+
+    for (uint8_t i = 0; i < usb->usbpd_status.pdo_src_count; ++i) {
+
+      volts = (float)(usb->usbpd_status.pdo_src[i].fix.Voltage) / 20.0F;
+      amps  = (float)(usb->usbpd_status.pdo_src[i].fix.Max_Operating_Current) / 100.0F;
+      watts = (uint16_t)(volts * amps);
+
+      snprintf(pdo_str, 32, "(%u) %4.1fV %4.1fV %2uW", i + 1, volts, amps, watts);
+
+      ili9341_draw_string(scr, 2, Y_START + 20 * i, &ili9341_font_11x18, ILI9341_WHITE, ILI9341_BLACK, iwwTruncate, pdo_str);
+    }
+  }
+
+#undef Y_START
+}
+
+void draw_pdo_snk_all(ili9341_device_t *scr, stusb4500_device_t *usb)
+{
+#define Y_START (scr->screen_size.height / 2U)
+
+  if ((NULL != scr) && (NULL != usb)) {
+
+    char pdo_str[32];
+    float volts;
+    float volts_lo, volts_hi; // variable supply
+    float amps;
+    uint16_t watts;
+
+    for (uint8_t i = 0; i < usb->usbpd_status.pdo_snk_count; ++i) {
+
+      switch (usb->usbpd_status.pdo_snk[i].fix.Fixed_Supply) {
+
+        case ssfFixed:
+          volts = (float)(usb->usbpd_status.pdo_snk[i].fix.Voltage) / 20.0F;
+          amps  = (float)(usb->usbpd_status.pdo_snk[i].fix.Operational_Current) / 100.0F;
+          watts = (uint16_t)(volts * amps);
+          snprintf(pdo_str, 32, "(%c) %4.1fV %4.1fA %2uW", 'F', volts, amps, watts);
+          break;
+
+        case ssfVariable:
+          volts_lo = (float)(usb->usbpd_status.pdo_snk[i].var.Min_Voltage) / 20.0F;
+          volts_hi = (float)(usb->usbpd_status.pdo_snk[i].var.Max_Voltage) / 20.0F;
+          amps     = (float)(usb->usbpd_status.pdo_snk[i].var.Operating_Current) / 100.0F;
+          snprintf(pdo_str, 32, "(%c) %4.1fV-%4.1fV %2uA", 'V', volts_lo, volts_hi, (uint16_t)amps);
+          break;
+
+        case ssfBattery:
+          volts_lo = (float)(usb->usbpd_status.pdo_snk[i].bat.Min_Voltage) / 20.0F;
+          volts_hi = (float)(usb->usbpd_status.pdo_snk[i].bat.Max_Voltage) / 20.0F;
+          watts    = (uint16_t)(usb->usbpd_status.pdo_snk[i].bat.Operating_Power) / 4.0F;
+          snprintf(pdo_str, 32, "(%c) %4.1fV-%4.1fA %2uW", 'B', volts_lo, volts_hi, watts);
+          break;
+
+        default:
+          break;
+      }
+      ili9341_draw_string(scr, 2, Y_START + 20 * i, &ili9341_font_11x18, ILI9341_WHITE, ILI9341_BLACK, iwwTruncate, pdo_str);
+    }
+  }
+
+#undef Y_START
+}
+
 void screen_touch_begin(ili9341_device_t *dev)
 {
   ; /* nothing */
@@ -72,30 +146,39 @@ void screen_touch_begin(ili9341_device_t *dev)
 
 void screen_touch_end(ili9341_device_t *dev)
 {
-  if (NULL != usbpd)
-    { stusb4500_get_source_capabilities(usbpd); }
+  static uint32_t mode = 0;
+  if (NULL != usbpd) {
+    //stusb4500_get_source_capabilities(usbpd);
+
+    stusb4500_status_t status;
+
+    switch(mode % 5) {
+      case 0:
+        status = stusb4500_set_power(usbpd,  5000, 3000);
+        break;
+      case 1:
+        status = stusb4500_set_power(usbpd,  9000, 3000);
+        break;
+      case 2:
+        status = stusb4500_set_power(usbpd, 12000, 3000);
+        break;
+      case 3:
+        status = stusb4500_set_power(usbpd, 15000, 3000);
+        break;
+      case 4:
+        status = stusb4500_set_power(usbpd, 20000, 4500);
+        break;
+    }
+    ++mode;
+
+    if (HAL_OK == status)
+      { draw_pdo_snk_all(dev, usbpd); }
+  }
 }
 
 void source_capabilities_received(stusb4500_device_t *dev)
 {
-  if (NULL != screen) {
-
-    char pdo_str[32];
-    float volts;
-    float amps;
-    uint16_t watts;
-
-    for (uint8_t i = 0; i < dev->usbpd_status.pdo_src_count; ++i) {
-
-      volts = (float)(dev->usbpd_status.pdo_src[i].fix.Voltage) / 20.0F;
-      amps  = (float)(dev->usbpd_status.pdo_src[i].fix.Max_Operating_Current) / 100.0F;
-      watts = (int)(volts * amps);
-
-      snprintf(pdo_str, 32, "(%u) %4.1fV, %3.1fA [%uW]", i + 1, volts, amps, watts);
-
-      ili9341_draw_string(screen, 2, 20 + 20 * i, &ili9341_font_11x18, ILI9341_WHITE, ILI9341_BLACK, iwwTruncate, pdo_str);
-    }
-  }
+  draw_pdo_src_all(screen, dev);
 }
 /* USER CODE END 0 */
 
@@ -108,7 +191,7 @@ int main(void)
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
-  
+
 
   /* MCU Configuration--------------------------------------------------------*/
 
@@ -184,10 +267,10 @@ void SystemClock_Config(void)
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
   RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
-  /** Configure the main internal regulator output voltage 
+  /** Configure the main internal regulator output voltage
   */
   HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1);
-  /** Initializes the CPU, AHB and APB busses clocks 
+  /** Initializes the CPU, AHB and APB busses clocks
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
@@ -204,7 +287,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  /** Initializes the CPU, AHB and APB busses clocks 
+  /** Initializes the CPU, AHB and APB busses clocks
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1;
@@ -216,7 +299,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  /** Initializes the peripherals clocks 
+  /** Initializes the peripherals clocks
   */
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_I2C1;
   PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK1;
@@ -269,7 +352,7 @@ void Error_Handler(void)
   * @retval None
   */
 void assert_failed(uint8_t *file, uint32_t line)
-{ 
+{
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line number,
      tex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */

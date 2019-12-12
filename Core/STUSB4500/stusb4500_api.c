@@ -101,13 +101,17 @@ static stusb4500_status_t stusb4500_i2c_write(stusb4500_device_t *dev,
 static stusb4500_status_t stusb4500_clear_all_alerts(stusb4500_device_t *dev,
     stusb4500_unmask_alerts_t unmask);
 static stusb4500_status_t stusb4500_read_port_status(stusb4500_device_t *dev);
-static stusb4500_status_t stusb4500_get_all_sink_pdo(stusb4500_device_t *dev);
-static stusb4500_status_t stusb4500_set_num_sink_pdo(stusb4500_device_t *dev,
+static stusb4500_status_t stusb4500_get_all_snk_pdos(stusb4500_device_t *dev);
+static stusb4500_status_t stusb4500_set_num_snk_pdos(stusb4500_device_t *dev,
     uint8_t count);
+static stusb4500_status_t stusb4500_set_snk_fix_pdo(stusb4500_device_t *dev,
+  uint8_t number, uint32_t voltage_mv, uint32_t current_ma);
+static stusb4500_status_t stusb4500_get_all_src_pdos(stusb4500_device_t *dev);
+static stusb4500_status_t stusb4500_get_requested_pdo(stusb4500_device_t *dev,
+    stusb4500_pdo_description_t *pdo_description);
 
 // USB power delivery messaging
 static stusb4500_status_t stusb4500_usbpd_cable_reset(stusb4500_device_t *dev);
-//static stusb4500_get_source_capabilities(stusb4500_device_t *dev);
 
 // interrupt message queueing handlers
 static stusb4500_status_t stusb4500_usbpd_push_message(stusb4500_device_t *dev,
@@ -158,15 +162,16 @@ stusb4500_device_t *stusb4500_device_new(
       };
 
       dev->usbpd_state_machine = (stusb4500_usbpd_state_machine_t){
-        .irq_received      = 0U,
-        .irq_hard_reset    = 0U,
-        .attach_transition = 0U,
-        .src_pdo_received  = 0U,
-        .psrdy_received    = 0U,
-        .msg_received      = 0U,
-        .msg_accept        = 0U,
-        .msg_reject        = 0U,
-        .msg_goodcrc       = 0U,
+        .irq_received       = 0U,
+        .irq_hard_reset     = 0U,
+        .attach_transition  = 0U,
+        .src_pdo_received   = 0U,
+        .src_pdo_requesting = 0U,
+        .psrdy_received     = 0U,
+        .msg_received       = 0U,
+        .msg_accept         = 0U,
+        .msg_reject         = 0U,
+        .msg_goodcrc        = 0U,
 
         .msg      = { 0U },
         .msg_head = 0U,
@@ -189,22 +194,24 @@ stusb4500_device_t *stusb4500_device_new(
  ****/
 stusb4500_status_t stusb4500_device_init(stusb4500_device_t *dev)
 {
-  stusb4500_status_t stat;
+  stusb4500_status_t status;
 
   if (NULL == dev)
     { return HAL_ERROR; }
 
-  //stusb4500_wait_until_ready(dev);
   stusb4500_soft_reset(dev, srwWaitReady);
 
-  if (HAL_OK != (stat = stusb4500_clear_all_alerts(dev, suaUnmaskAlerts)))
-    { return stat; }
+  if (HAL_OK != (status = stusb4500_set_num_snk_pdos(dev, 1U)))
+    { return status; }
 
-  if (HAL_OK != (stat = stusb4500_read_port_status(dev)))
-    { return stat; }
+  if (HAL_OK != (status = stusb4500_clear_all_alerts(dev, suaUnmaskAlerts)))
+    { return status; }
 
-  if (HAL_OK != (stat = stusb4500_get_source_capabilities(dev)))
-    { return stat; }
+  if (HAL_OK != (status = stusb4500_read_port_status(dev)))
+    { return status; }
+
+  if (HAL_OK != (status = stusb4500_get_all_src_pdos(dev)))
+    { return status; }
 
   return HAL_OK;
 }
@@ -216,14 +223,14 @@ stusb4500_status_t stusb4500_device_init(stusb4500_device_t *dev)
  ****/
 stusb4500_status_t stusb4500_ready(stusb4500_device_t *dev)
 {
-  stusb4500_status_t stat;
+  stusb4500_status_t status;
   uint8_t device_id;
 
   if (NULL == dev)
     { return HAL_ERROR; }
 
-  if (HAL_OK != (stat = stusb4500_i2c_read(dev, REG_DEVICE_ID, &device_id, 1U)))
-    { return stat; }
+  if (HAL_OK != (status = stusb4500_i2c_read(dev, REG_DEVICE_ID, &device_id, 1U)))
+    { return status; }
 
   if (__STUSB4500_DEVICE_ID__ != device_id)
     { return HAL_ERROR; }
@@ -280,20 +287,20 @@ void stusb4500_hard_reset(stusb4500_device_t *dev, stusb4500_reset_wait_t wait)
 void stusb4500_soft_reset(stusb4500_device_t *dev, stusb4500_reset_wait_t wait)
 {
   uint8_t buff_src = SW_RST;
-  stusb4500_status_t stat =
+  stusb4500_status_t status =
       stusb4500_i2c_write(dev, STUSB_GEN1S_RESET_CTRL_REG, &buff_src, 1);
-  if (HAL_OK != stat)
+  if (HAL_OK != status)
     { return; }
 
-  if (HAL_OK != (stat = stusb4500_clear_all_alerts(dev, suaDoNotUnmask)))
+  if (HAL_OK != (status = stusb4500_clear_all_alerts(dev, suaDoNotUnmask)))
     { return; }
 
   HAL_Delay(__STUSB4500_SW_RESET_DEBOUNCE_MS__);
 
   // restore reset control register to listen only on hardware reset pin
   buff_src = No_SW_RST;
-  stat = stusb4500_i2c_write(dev, STUSB_GEN1S_RESET_CTRL_REG, &buff_src, 1);
-  if (HAL_OK != stat)
+  status = stusb4500_i2c_write(dev, STUSB_GEN1S_RESET_CTRL_REG, &buff_src, 1);
+  if (HAL_OK != status)
     { return; } // not superfluous, used for debugging
 
   switch (wait) {
@@ -388,8 +395,8 @@ void stusb4500_alert(stusb4500_device_t *dev)
   if (NULL == dev)
     { return; }
 
-  stusb4500_status_t stat = stusb4500_i2c_read(dev, ALERT_STATUS_1, read_buff, 2U);
-  if (HAL_OK != stat)
+  stusb4500_status_t status = stusb4500_i2c_read(dev, ALERT_STATUS_1, read_buff, 2U);
+  if (HAL_OK != status)
     { return; } // if ALRT interrupt works and I2C doesn't, something's very wrong
 
   alert_mask.d8   = read_buff[1];
@@ -406,8 +413,8 @@ void stusb4500_alert(stusb4500_device_t *dev)
 
     // bit 7
     if (0U != alert_status.b.CC_DETECTION_STATUS_AL) {
-      stat = stusb4500_i2c_read(dev, PORT_STATUS_TRANS, read_buff, 2U);
-      if (HAL_OK != stat)
+      status = stusb4500_i2c_read(dev, PORT_STATUS_TRANS, read_buff, 2U);
+      if (HAL_OK != status)
         { return; }
       dev->usbpd_status.cc_detection_status.d8 = read_buff[1];
       if (0U != (read_buff[0] & STUSBMASK_ATTACH_STATUS_TRANS))
@@ -416,22 +423,22 @@ void stusb4500_alert(stusb4500_device_t *dev)
 
     // bit 6
     if (0U != alert_status.b.MONITORING_STATUS_AL) {
-      stat = stusb4500_i2c_read(dev, TYPEC_MONITORING_STATUS_0, read_buff, 2U);
-      if (HAL_OK != stat)
+      status = stusb4500_i2c_read(dev, TYPEC_MONITORING_STATUS_0, read_buff, 2U);
+      if (HAL_OK != status)
         { return; }
       dev->usbpd_status.monitoring_status.d8 = read_buff[1];
     }
 
     // always read & update CC attachement status
-    stat = stusb4500_i2c_read(dev, CC_STATUS, read_buff, 1U);
-    if (HAL_OK != stat)
+    status = stusb4500_i2c_read(dev, CC_STATUS, read_buff, 1U);
+    if (HAL_OK != status)
       { return; }
     dev->usbpd_status.cc_status.d8 = read_buff[0];
 
     // bit 5
     if (0U != alert_status.b.HW_FAULT_STATUS_AL) {
-      stat = stusb4500_i2c_read(dev, CC_HW_FAULT_STATUS_0, read_buff, 2U);
-      if (HAL_OK != stat)
+      status = stusb4500_i2c_read(dev, CC_HW_FAULT_STATUS_0, read_buff, 2U);
+      if (HAL_OK != status)
         { return; }
       dev->usbpd_status.hw_fault_status.d8 = read_buff[1];
     }
@@ -441,15 +448,15 @@ void stusb4500_alert(stusb4500_device_t *dev)
 
       stusb4500_usbpd_message_header_t header;
 
-      stat = stusb4500_i2c_read(dev, PRT_STATUS, read_buff, 1U);
-      if (HAL_OK != stat)
+      status = stusb4500_i2c_read(dev, PRT_STATUS, read_buff, 1U);
+      if (HAL_OK != status)
         { return; }
       dev->usbpd_status.prt_status.d8 = read_buff[0];
 
       if (1U == dev->usbpd_status.prt_status.b.MSG_RECEIVED) {
 
-        stat = stusb4500_i2c_read(dev, RX_HEADER, read_buff, 2U);
-        if (HAL_OK != stat)
+        status = stusb4500_i2c_read(dev, RX_HEADER, read_buff, 2U);
+        if (HAL_OK != status)
           { return; }
 
         header.d16 = __U16_LEND(read_buff);
@@ -459,8 +466,8 @@ void stusb4500_alert(stusb4500_device_t *dev)
           stusb4500_usbpd_push_message(dev,
               __STUSB4500_USBPD_MESSAGE_TYPE_DATA__, header.b.message_type);
 
-          stat = stusb4500_i2c_read(dev, RX_BYTE_CNT, read_buff, 1U);
-          if (HAL_OK != stat)
+          status = stusb4500_i2c_read(dev, RX_BYTE_CNT, read_buff, 1U);
+          if (HAL_OK != status)
             { return; }
           uint8_t rx_byte_count = read_buff[0];
           if (rx_byte_count != header.b.data_object_count * 4U)
@@ -469,8 +476,8 @@ void stusb4500_alert(stusb4500_device_t *dev)
           switch (header.b.message_type) {
             case USBPD_DATAMSG_Source_Capabilities:
 
-              stat = stusb4500_i2c_read(dev, RX_DATA_OBJ, read_buff, rx_byte_count);
-              if (HAL_OK != stat)
+              status = stusb4500_i2c_read(dev, RX_DATA_OBJ, read_buff, rx_byte_count);
+              if (HAL_OK != status)
                 { return; }
 
               dev->usbpd_status.pdo_src_count = header.b.data_object_count;
@@ -478,6 +485,7 @@ void stusb4500_alert(stusb4500_device_t *dev)
                 dev->usbpd_status.pdo_src[i].d32 = __U32_LEND(&read_buff[j]);
               }
 
+              dev->usbpd_state_machine.src_pdo_requesting = 0U;
               ++(dev->usbpd_state_machine.src_pdo_received);
               break;
 
@@ -573,18 +581,35 @@ stusb4500_cable_connected_t stusb4500_cable_connected(stusb4500_device_t *dev)
 
 stusb4500_status_t stusb4500_get_source_capabilities(stusb4500_device_t *dev)
 {
-  if (NULL == dev)
+  return stusb4500_get_all_src_pdos(dev);
+}
+
+stusb4500_status_t stusb4500_set_power(stusb4500_device_t *dev,
+    uint32_t voltage_mv, uint32_t current_ma)
+{
+  stusb4500_status_t status;
+
+  stusb4500_cable_connected_t conn = stusb4500_cable_connected(dev);
+  if (!__CABLE_CONNECTED(conn))
     { return HAL_ERROR; }
 
-  stusb4500_status_t stat;
+  if (HAL_OK != (status = stusb4500_set_num_snk_pdos(dev, 2U)))
+    { return status; }
 
-  if (HAL_OK != (stat = stusb4500_usbpd_cable_reset(dev)))
-    { return stat; }
+  if (HAL_OK != (status = stusb4500_set_snk_fix_pdo(dev, 2U, voltage_mv, current_ma)))
+    { return status; }
+
+  if (HAL_OK != (status = stusb4500_usbpd_cable_reset(dev)))
+    { return status; }
+
+  if (HAL_OK != (status = stusb4500_get_all_snk_pdos(dev)))
+    { return status; }
 
   return HAL_OK;
 }
 
-void stusb4500_set_source_capabilities_received(stusb4500_device_t *dev, stusb4500_event_callback_t callback)
+void stusb4500_set_source_capabilities_received(stusb4500_device_t *dev,
+    stusb4500_event_callback_t callback)
 {
   if ((NULL != dev) && (NULL != callback)) {
     dev->source_capabilities_received = callback;
@@ -644,12 +669,12 @@ static stusb4500_status_t stusb4500_i2c_write(stusb4500_device_t *dev,
 static stusb4500_status_t stusb4500_clear_all_alerts(stusb4500_device_t *dev,
     stusb4500_unmask_alerts_t unmask)
 {
-  stusb4500_status_t stat;
+  stusb4500_status_t status;
 
   // clear alert status
   uint8_t alert_status[12];
-  if (HAL_OK != (stat = stusb4500_i2c_read(dev, ALERT_STATUS_1, alert_status, 12U)))
-    { return stat; }
+  if (HAL_OK != (status = stusb4500_i2c_read(dev, ALERT_STATUS_1, alert_status, 12U)))
+    { return status; }
 
   STUSB_GEN1S_ALERT_STATUS_MASK_RegTypeDef alert_mask;
   switch (unmask) {
@@ -664,9 +689,9 @@ static stusb4500_status_t stusb4500_clear_all_alerts(stusb4500_device_t *dev,
       alert_mask.b.CC_DETECTION_STATUS_AL_MASK = 0U;
       alert_mask.b.HARD_RESET_AL_MASK          = 0U;
       // unmask the above alarms
-      if (HAL_OK != (stat = stusb4500_i2c_write(dev,
+      if (HAL_OK != (status = stusb4500_i2c_write(dev,
             ALERT_STATUS_MASK, &(alert_mask.d8), 1U)))
-        { return stat; }
+        { return status; }
       break;
 
     case suaDoNotUnmask:
@@ -682,9 +707,9 @@ static stusb4500_status_t stusb4500_read_port_status(stusb4500_device_t *dev)
 #define BUFF_SZ 10
   uint8_t prt_buff[BUFF_SZ];
 
-  stusb4500_status_t stat = stusb4500_i2c_read(dev, REG_PORT_STATUS, prt_buff, BUFF_SZ);
-  if (HAL_OK != stat)
-    { return stat; }
+  stusb4500_status_t status = stusb4500_i2c_read(dev, REG_PORT_STATUS, prt_buff, BUFF_SZ);
+  if (HAL_OK != status)
+    { return status; }
 
   dev->usbpd_status.cc_detection_status.d8 = prt_buff[1];
   dev->usbpd_status.cc_status.d8           = prt_buff[3];
@@ -695,29 +720,119 @@ static stusb4500_status_t stusb4500_read_port_status(stusb4500_device_t *dev)
 #undef BUFF_SZ
 }
 
-static stusb4500_status_t stusb4500_get_all_sink_pdo(stusb4500_device_t *dev)
+static stusb4500_status_t stusb4500_get_all_snk_pdos(stusb4500_device_t *dev)
 {
 #define BUFF_SZ __STUSB4500_NVM_SINK_PDO_COUNT__ * sizeof(USB_PD_SNK_PDO_TypeDef)
   uint8_t pdo_buff[BUFF_SZ];
+  uint8_t pdo_count;
 
-  stusb4500_status_t stat = stusb4500_i2c_read(dev, DPM_SNK_PDO1, pdo_buff, BUFF_SZ);
-  if (HAL_OK != stat)
-    { return stat; }
+  stusb4500_status_t status = stusb4500_i2c_read(dev, DPM_PDO_NUMB, &pdo_count, 1U);
+  if (HAL_OK != status)
+    { return status; }
 
+  status = stusb4500_i2c_read(dev, DPM_SNK_PDO1, pdo_buff, BUFF_SZ);
+  if (HAL_OK != status)
+    { return status; }
+
+  dev->usbpd_status.pdo_snk_count = pdo_count;
   for (uint8_t i = 0, j = 0; i < __STUSB4500_NVM_SINK_PDO_COUNT__; ++i, j += 4) {
-    dev->usbpd_status.pdo_snk[i].d32 = __U32_LEND(&pdo_buff[j]);
+    if (i < pdo_count)
+      { dev->usbpd_status.pdo_snk[i].d32 = __U32_LEND(&pdo_buff[j]); }
+    else
+      { dev->usbpd_status.pdo_snk[i].d32 = 0U; }
   }
   return HAL_OK;
 #undef BUFF_SZ
 }
 
-static stusb4500_status_t stusb4500_set_num_sink_pdo(stusb4500_device_t *dev,
+static stusb4500_status_t stusb4500_set_num_snk_pdos(stusb4500_device_t *dev,
     uint8_t count)
 {
   if ((count < 1) || (count > __STUSB4500_NVM_SINK_PDO_COUNT__))
     { return HAL_ERROR; }
 
   return stusb4500_i2c_write(dev, DPM_PDO_NUMB, &count, 1);
+}
+
+static stusb4500_status_t stusb4500_set_snk_fix_pdo(stusb4500_device_t *dev,
+  uint8_t number, uint32_t voltage_mv, uint32_t current_ma)
+{
+  if ((number < 1) || (number > __STUSB4500_NVM_SINK_PDO_COUNT__))
+    { return HAL_ERROR; }
+
+  if (1U == number) // PDO 1 must always be USB +5V
+    { voltage_mv = 5000U; }
+
+  USB_PD_SNK_PDO_TypeDef pdo = dev->usbpd_status.pdo_snk[0];
+  uint8_t address = DPM_SNK_PDO1 + (4U * (number - 1));
+  pdo.fix.Voltage = voltage_mv / 50U;
+  pdo.fix.Operational_Current = current_ma / 10U;
+
+  return stusb4500_i2c_write(dev, address, (uint8_t *)&(pdo.d32), 4U);
+}
+
+// static stusb4500_status_t stusb4500_set_snk_var_pdo(stusb4500_device_t *dev)
+// {
+//   return HAL_OK;
+// }
+
+// static stusb4500_status_t stusb4500_set_snk_bat_pdo(stusb4500_device_t *dev)
+// {
+//   return HAL_OK;
+// }
+
+static stusb4500_status_t stusb4500_get_all_src_pdos(stusb4500_device_t *dev)
+{
+  if (NULL == dev)
+    { return HAL_ERROR; }
+
+  static uint32_t const request_wait = 200; // milliseconds
+  static uint8_t  const max_requests = 5;
+
+  uint32_t request_start = HAL_GetTick();
+  uint8_t request = 0U;
+
+  stusb4500_status_t status;
+
+  ++(dev->usbpd_state_machine.src_pdo_requesting);
+
+  while ((0U != dev->usbpd_state_machine.src_pdo_requesting) &&
+      (request < max_requests)) {
+    if ((0U == request) || ((HAL_GetTick() - request_start) >= request_wait)) {
+      if (HAL_OK != (status = stusb4500_usbpd_cable_reset(dev)))
+        { return status; }
+      request_start = HAL_GetTick();
+      ++request;
+    }
+  }
+
+  return HAL_OK;
+}
+
+static stusb4500_status_t stusb4500_get_requested_pdo(stusb4500_device_t *dev,
+    stusb4500_pdo_description_t *pdo_description)
+{
+  STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo;
+  stusb4500_status_t status =
+      stusb4500_i2c_read(dev, RDO_REG_STATUS, (uint8_t *)&rdo, sizeof(rdo));
+  if (HAL_OK != status)
+    { return status; }
+
+  if (rdo.b.Object_Pos > 0) {
+
+    pdo_description->number = rdo.b.Object_Pos;
+    pdo_description->current_ma = rdo.b.OperatingCurrent;
+    pdo_description->max_current_ma = rdo.b.MaxCurrent;
+
+    if (pdo_description->number <= dev->usbpd_status.pdo_snk_count) {
+      pdo_description->voltage_mv =
+          dev->usbpd_status.pdo_snk[pdo_description->number - 1U].fix.Voltage * 50U;
+    }
+    return HAL_OK;
+  }
+  else {
+    return HAL_ERROR;
+  }
 }
 
 /****
@@ -735,19 +850,19 @@ static stusb4500_status_t stusb4500_usbpd_cable_reset(stusb4500_device_t *dev)
   if (!__CABLE_CONNECTED(conn))
     { return HAL_ERROR; }
 
-  stusb4500_status_t stat;
+  stusb4500_status_t status;
 
   // send PD message "soft reset" to source by setting TX header (0x51) to 0x0D,
   // and set PD command (0x1A) to 0x26.
   uint8_t soft_reset_data = USBPD_HEADER_SOFT_RESET;
-  stat = stusb4500_i2c_write(dev, TX_HEADER, &soft_reset_data, 1U);
-  if (HAL_OK != stat)
-    { return stat; }
+  status = stusb4500_i2c_write(dev, TX_HEADER, &soft_reset_data, 1U);
+  if (HAL_OK != status)
+    { return status; }
 
   uint8_t pd_command = USBPD_PD_COMMAND;
-  stat = stusb4500_i2c_write(dev, STUSB_GEN1S_CMD_CTRL, &pd_command, 1U);
-  if (HAL_OK != stat)
-    { return stat; }
+  status = stusb4500_i2c_write(dev, STUSB_GEN1S_CMD_CTRL, &pd_command, 1U);
+  if (HAL_OK != status)
+    { return status; }
 
   return HAL_OK;
 

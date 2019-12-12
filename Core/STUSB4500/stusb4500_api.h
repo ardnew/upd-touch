@@ -67,6 +67,25 @@ typedef enum
 }
 stusb4500_reset_wait_t;
 
+typedef enum
+{
+  ssfNONE = -1,
+  ssfFixed,    // = 0
+  ssfVariable, // = 1
+  ssfBattery,  // = 2
+  ssfCOUNT,    // = 3
+}
+stusb4500_supply_fix_t;
+
+typedef struct
+{
+  uint8_t number;
+  uint16_t voltage_mv;
+  uint16_t current_ma;
+  uint16_t max_current_ma;
+}
+stusb4500_pdo_description_t;
+
 typedef void (*stusb4500_event_callback_t)(stusb4500_device_t *);
 
 typedef HAL_StatusTypeDef stusb4500_status_t;
@@ -96,6 +115,7 @@ struct stusb4500_usbpd_state_machine
   volatile uint16_t irq_hard_reset;
   volatile uint16_t attach_transition;
   volatile uint16_t src_pdo_received;
+  volatile uint16_t src_pdo_requesting;
   volatile uint16_t psrdy_received;
   volatile uint16_t msg_received;
   volatile uint16_t msg_accept;
@@ -149,9 +169,13 @@ void stusb4500_alert(stusb4500_device_t *dev);
 void stusb4500_attach(stusb4500_device_t *dev);
 
 stusb4500_cable_connected_t stusb4500_cable_connected(stusb4500_device_t *dev);
-stusb4500_status_t stusb4500_get_source_capabilities(stusb4500_device_t *dev);
 
-void stusb4500_set_source_capabilities_received(stusb4500_device_t *dev, stusb4500_event_callback_t callback);
+stusb4500_status_t stusb4500_get_source_capabilities(stusb4500_device_t *dev);
+stusb4500_status_t stusb4500_set_power(stusb4500_device_t *dev,
+    uint32_t voltage_mv, uint32_t current_ma);
+
+void stusb4500_set_source_capabilities_received(stusb4500_device_t *dev,
+    stusb4500_event_callback_t callback);
 
 #ifdef __cplusplus
 }
