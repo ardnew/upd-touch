@@ -94,6 +94,15 @@ ili9341_touch_pressed_t;
 
 typedef enum
 {
+  itnNONE = -1,
+  itnNotNormalized, // = 0
+  itnNormalized,    // = 1
+  itnCOUNT          // = 2
+}
+ili9341_touch_normalize_t;
+
+typedef enum
+{
   iwwNONE = -1,
   iwwTruncate, // = 0
   iwwCharWrap, // = 1
@@ -111,7 +120,7 @@ typedef enum
 }
 ili9341_spi_slave_t;
 
-typedef void (*ili9341_touch_callback_t)(ili9341_device_t *);
+typedef void (*ili9341_touch_callback_t)(ili9341_device_t *, uint16_t, uint16_t);
 
 typedef HAL_StatusTypeDef ili9341_status_t;
 
@@ -134,11 +143,13 @@ struct ili9341_device
   GPIO_TypeDef *touch_irq_port;
   uint16_t      touch_irq_pin;
 
-  ili9341_touch_support_t touch_support;
-  ili9341_two_dimension_t touch_coordinate_min;
-  ili9341_two_dimension_t touch_coordinate_max;
+  ili9341_touch_support_t   touch_support;
+  ili9341_touch_normalize_t touch_normalize;
+  ili9341_two_dimension_t   touch_coordinate;
+  ili9341_two_dimension_t   touch_coordinate_min;
+  ili9341_two_dimension_t   touch_coordinate_max;
 
-  ili9341_touch_pressed_t touch_pressed;
+  ili9341_touch_pressed_t  touch_pressed;
   ili9341_touch_callback_t touch_pressed_begin;
   ili9341_touch_callback_t touch_pressed_end;
 };
@@ -169,7 +180,8 @@ ili9341_device_t *ili9341_device_new(
     GPIO_TypeDef *touch_select_port, uint16_t touch_select_pin,
     GPIO_TypeDef *touch_irq_port,    uint16_t touch_irq_pin,
 
-    ili9341_touch_support_t touch_support,
+    ili9341_touch_support_t   touch_support,
+    ili9341_touch_normalize_t touch_normalize,
     uint16_t touch_coordinate_min_x,
     uint16_t touch_coordinate_min_y,
     uint16_t touch_coordinate_max_x,
@@ -190,6 +202,9 @@ ili9341_touch_pressed_t ili9341_touch_pressed(ili9341_device_t *dev);
 
 void ili9341_set_touch_pressed_begin(ili9341_device_t *dev, ili9341_touch_callback_t callback);
 void ili9341_set_touch_pressed_end(ili9341_device_t *dev, ili9341_touch_callback_t callback);
+
+ili9341_touch_pressed_t ili9341_touch_coordinate(ili9341_device_t *dev,
+    uint16_t *x_pos, uint16_t *y_pos);
 
 #ifdef __cplusplus
 }
